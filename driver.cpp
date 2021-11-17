@@ -79,7 +79,7 @@ struct results {
 
 void parseargs(int argc, char** argv, config& cfg) {
     int opt;
-    while ((opt = getopt(argc, argv, "r:s:p:o:t:x:l:i")) != -1) {
+    while ((opt = getopt(argc, argv, "r:s:p:o:t:x:l:i:")) != -1) {
         switch (opt) {
             case 'r': cfg.range = atoi(optarg); break;
             case 's': cfg.size = atoi(optarg); break;

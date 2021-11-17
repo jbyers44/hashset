@@ -91,6 +91,17 @@ template <typename T> class concurrent_set: public set<T> {
             return entry_old;
         }
 
+        void aquire_r(T value) {
+            std::shared_lock lock0(lock_table0[hash0(value)]);
+            std::shared_lock lock1(lock_table1[hash1(value)]);
+        }
+
+        void aquire_w(T value) {
+            int l_index0 = hash0(value)
+            std::unique_lock lock0(lock_table0[hash0(value)]);
+            std::unique_lock lock1(lock_table1[hash1(value)]);
+        }
+
     public:
 
         concurrent_set(int size, int num_locks, int limit) {
@@ -125,6 +136,8 @@ template <typename T> class concurrent_set: public set<T> {
             }
             
             for(int i = 0; i < limit; i++) {
+                aquire_w(value);
+                
                 entry swapped = swap(table0, value, hash0(value));
                 if (!swapped.has_value) {
                     return true;
@@ -147,6 +160,7 @@ template <typename T> class concurrent_set: public set<T> {
         }
 
         bool remove(T value){
+            aquire_w(value);
             // Check if the value is in table0, if so, remove it
             int index = hash0(value);
 
@@ -169,6 +183,8 @@ template <typename T> class concurrent_set: public set<T> {
 
         bool contains(T value){
             // Check if the value is in table0
+            aquire_r(value);
+
             int index = hash0(value);
 
             if (table0[index].has_value && table0[index].value == value) {
@@ -206,6 +222,7 @@ template <typename T> class concurrent_set: public set<T> {
         // Generate random values until we've inserted pop items
         void populate(int pop, T (*random_t)()) {
             for(int i = 0; i < pop; i++) {
+                std::cout << i << std::endl;
                 while(!add(random_t()));
             }
         }
