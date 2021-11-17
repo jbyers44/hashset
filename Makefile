@@ -1,23 +1,59 @@
-CC 		= g++
-CFLAGS 	= -Wall -Wextra -Werror -Wwrite-strings -pthread -std=c++17 -g
-OPT 	=
+#  CSE 375/475 Assignment #1
+#  Fall 2021
+#
+#  Description: This makefile allows you to build the assignment by typing
+#  'make'.  Note that typing "BITS=64 make" will build a 64-bit executable
+#  instead of a 32-bit executable.
+#
+#  Note: It's worth understanding how this Makefile works
+#
 
-all: driver
+# This defaults bits to 32, but allows it to be overridden on the command
+# line
+BITS = 32
 
-set: 
-	$(CC) $(CFLAGS) $(OPT) -c set.h
+# Output directory
+ODIR  = obj32
+tmp  := $(shell mkdir -p $(ODIR))
 
-sequential: set.o
-	$(CC) $(CFLAGS) $(OPT) -c sequential.cpp
+# Basic compiler configuration and flags
+CXX      = g++
+CXXFLAGS = -MMD -ggdb -std=c++17 -m$(BITS)
+LDFLAGS	 = -m$(BITS) -lpthread -lrt
 
-concurrent: set.o
-	$(CC) $(CFLAGS) $(OPT) -c concurrent.cpp
+# The basenames of the c++ files that this program uses
+CXXFILES = driver concurrent sequential transactional
 
-transactional: set.o
-	$(CC) $(CFLAGS) $(OPT) -c transactional.cpp
+# The executable we will build
+TARGET = $(ODIR)/driver
 
-driver: sequential.o concurrent.o transactional.o driver.cpp
-	$(CC) $(CFLAGS) $(OPT) -o driver driver.cpp
+# Create the .o names from the CXXFILES
+OFILES = $(patsubst %, $(ODIR)/%.o, $(CXXFILES))
 
+# Create .d files to store dependency information, so that we don't need to
+# clean every time before running make
+DFILES = $(patsubst %.o, %.d, $(OFILES))
+
+# Default rule builds the executable
+all: $(TARGET)
+
+# clean up everything by clobbering the output folder
 clean:
-	rm -rf *.o driver
+	@echo cleaning up...
+	@rm -rf $(ODIR)
+
+# build an .o file from a .cc file
+$(ODIR)/%.o: %.cpp
+	@echo [CXX] $< "-->" $@
+	@$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+# Link rule for building the target from .o files
+$(TARGET): $(OFILES)
+	@echo [LD] $^ "-->" $@
+	@$(CXX) -o $@ $^ $(LDFLAGS)
+
+# Remember that 'all' and 'clean' aren't real targets
+.PHONY: all clean
+
+# Pull in all dependencies
+-include $(DFILES)

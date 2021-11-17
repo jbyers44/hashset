@@ -106,8 +106,8 @@ template <typename T> class concurrent_set: public set<T> {
                 table1[i].has_value = false;
             }
 
-            std::vector<std::mutex> locks0(num_locks);
-            std::vector<std::mutex> locks1(num_locks);
+            std::vector<std::shared_mutex> locks0(num_locks);
+            std::vector<std::shared_mutex> locks1(num_locks);
 
             lock_table0.swap(locks0);
             lock_table1.swap(locks1);
