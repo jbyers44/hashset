@@ -19,8 +19,8 @@ template <typename T> class concurrent_set: public set<T> {
         // Current size of the hashset
         int set_size;
 
-        // Offset amount for hash1
-        int offset;
+        // Lock table size
+        int locks;
 
         // The maximum amount of tries we should attempt before resizing the table
         int limit;
@@ -65,8 +65,19 @@ template <typename T> class concurrent_set: public set<T> {
                 table1[i].has_value = false;
             }
 
+            for(int i = 0; i < size_old; i++) {
+                int l_index0 = size_old % locks;
+                std::unique_lock lock0(lock_table0[l_index0]);
+                std::unique_lock lock1(lock_table1[l_index1]);
+            }
+
             // Copy over the old entries, but only the ones that had values
             for(int i = 0; i < size_old; i++) {
+                int l_index = i % locks;
+                std::unique_lock lock0(lock_table0[l_index]);
+                std::unique_lock lock1(lock_table1[l_index]);
+
+
                 if (table0_old[i].has_value) {
                     add(table0_old[i].value);
                 }
@@ -92,21 +103,26 @@ template <typename T> class concurrent_set: public set<T> {
         }
 
         void aquire_r(T value) {
-            std::shared_lock lock0(lock_table0[hash0(value)]);
-            std::shared_lock lock1(lock_table1[hash1(value)]);
+            int l_index0 = hash0(value) % locks;
+            int l_index1 = hash1(value) % locks;
+
+            std::shared_lock lock0(lock_table0[l_index0]);
+            std::shared_lock lock1(lock_table1[l_index1]);
         }
 
         void aquire_w(T value) {
-            int l_index0 = hash0(value)
-            std::unique_lock lock0(lock_table0[hash0(value)]);
-            std::unique_lock lock1(lock_table1[hash1(value)]);
+            int l_index0 = hash0(value) % locks;
+            int l_index1 = hash1(value) % locks;
+
+            std::unique_lock lock0(lock_table0[l_index0]);
+            std::unique_lock lock1(lock_table1[l_index1]);
         }
 
     public:
 
         concurrent_set(int size, int num_locks, int limit) {
             this->set_size = size;
-            this->offset = offset;
+            this->locks = num_locks;
             this->limit = limit;
 
             table0 = new entry[set_size];
@@ -143,7 +159,7 @@ template <typename T> class concurrent_set: public set<T> {
                     return true;
                 }
                 value = swapped.value;
-
+                
                 // Take the value we swapped from table0 and repeat the process for table1
                 swapped = swap(table1, value, hash1(value));
                 if (!swapped.has_value) {
@@ -152,6 +168,7 @@ template <typename T> class concurrent_set: public set<T> {
                 value = swapped.value;
             }
 
+            std::cout << "Oh no!" << std::endl;
             // We've gone <limit> iterations, the table is probably full, resize it
             resize();
             add(value);
@@ -222,7 +239,6 @@ template <typename T> class concurrent_set: public set<T> {
         // Generate random values until we've inserted pop items
         void populate(int pop, T (*random_t)()) {
             for(int i = 0; i < pop; i++) {
-                std::cout << i << std::endl;
                 while(!add(random_t()));
             }
         }
