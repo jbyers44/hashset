@@ -278,7 +278,7 @@ int main(int argc, char** argv) {
     results res;
 
     int_set->populate(cfg.population, &random_int);
-
+    
     std::vector<std::vector<char>> op_dists = op_distributions(cfg);
     std::vector<std::vector<int>> val_dists = val_distributions(cfg);
 
