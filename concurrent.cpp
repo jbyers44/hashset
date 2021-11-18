@@ -25,12 +25,13 @@ template <typename T> class concurrent_set: public set<T> {
         // The maximum amount of tries we should attempt before resizing the table
         int limit;
 
-        // Tables which correspond to their appropriate hash functions
-        entry* table0;
-        entry* table1;
+        int probe_size = 4;
+        int threshold = 2;
 
-        std::vector<std::shared_mutex> lock_table0;
-        std::vector<std::shared_mutex> lock_table1;
+        // Tables which correspond to their appropriate hash functions
+        std::vector<std::vector<T>> tables[2];
+
+        std::vector<std::recursive_mutex> lock_table[2];
 
         // Primary table
         int hash0(int value) {
@@ -50,46 +51,90 @@ template <typename T> class concurrent_set: public set<T> {
             // Track the old size, double the current
             int size_old = set_size;
 
-            set_size = (size_old * 2);
-
-            // Keep track of the old data as we'll need to reinsert it with the "new" hash function
-            entry* table0_old = table0;
-            entry* table1_old = table1;
-
-            // New tables, default initializes has_value to false
-            table0 = new entry[set_size];
-            table1 = new entry[set_size];
-
-            for(int i = 0; i < set_size; i++) {
-                table0[i].has_value = false;
-                table1[i].has_value = false;
+            for(int i = 0; i < locks; i++) {
+                std::unique_lock<std::recursive_mutex> lock(lock_table[0][i]);
             }
 
-            for(int i = 0; i < size_old; i++) {
-                int l_index0 = size_old % locks;
-                std::unique_lock lock0(lock_table0[l_index0]);
-                std::unique_lock lock1(lock_table1[l_index1]);
+            if (size_old != set_size) {
+                // We didn't acquire locks in time
+                return;
+            }
+
+            std::vector<std::vector<T>> table0_old = tables[0];
+            std::vector<std::vector<T>> table1_old = tables[1];
+
+            set_size = size_old * 2;
+
+            tables[0] = std::vector<std::vector<T>>(set_size);
+            tables[1] = std::vector<std::vector<T>>(set_size);
+
+            for(int i = 0; i < set_size; i++) {
+                tables[0].push_back(std::vector<T>(probe_size));
+                tables[1].push_back(std::vector<T>(probe_size));
             }
 
             // Copy over the old entries, but only the ones that had values
             for(int i = 0; i < size_old; i++) {
-                int l_index = i % locks;
-                std::unique_lock lock0(lock_table0[l_index]);
-                std::unique_lock lock1(lock_table1[l_index]);
+                for (auto it = table0_old[i].begin(); it != table0_old[i].end(); ++it) {
+					add(*it);
+				}
 
+                for (auto it = table1_old[i].begin(); it != table1_old[i].end(); ++it) {
+					add(*it);
+				}
+            }
+        }
+        
+        bool relocate(int i, int hi) {
+            int j = 1 - i;
+            int hj = 0;
 
-                if (table0_old[i].has_value) {
-                    add(table0_old[i].value);
+            for (int round = 0; round < limit; round++) {
+                T val = tables[i][hi].at(0);
+
+                if (i) {
+                    hj = hash0(val);
+                }
+                else {
+                    hj = hash1(val);
                 }
 
-                if (table1_old[i].has_value) {
-                    add(table1_old[i].value);
+                acquire(val);
+
+                bool removed;
+                for (int i = 0; i < tables[i][hi].size(); ++i) {
+                    if (tables[i][hi].at(i) == val) {
+                        tables[i][hi].erase(tables[i][hi].begin() + i);
+                        removed = true;
+                        break;
+                    }
+                }
+
+                if (removed) {
+                    if (tables[j][hj].size() < threshold) {
+                        tables[j][hj].push_back(val);
+                        return true;
+                    }
+                    else if (tables[j][hj].size() < probe_size) {
+                        tables[j][hj].push_back(val);
+                        i = 1 - i;
+                        hi = hj;
+                        j = 1 - j;
+                    }
+                    else {
+                        tables[i][hi].push_back(val);
+                        return false;
+                    }
+                }
+                else if (tables[i][hi].size() >= threshold) {
+                    continue;
+                }
+                else {
+                    return true;
                 }
             }
 
-            // Delete old tables
-            delete[] table0_old;
-            delete[] table1_old;
+            return false;
         }
 
         // Swap a new entry, return the old one
@@ -102,20 +147,12 @@ template <typename T> class concurrent_set: public set<T> {
             return entry_old;
         }
 
-        void aquire_r(T value) {
+        void acquire(T value) {
             int l_index0 = hash0(value) % locks;
             int l_index1 = hash1(value) % locks;
 
-            std::shared_lock lock0(lock_table0[l_index0]);
-            std::shared_lock lock1(lock_table1[l_index1]);
-        }
-
-        void aquire_w(T value) {
-            int l_index0 = hash0(value) % locks;
-            int l_index1 = hash1(value) % locks;
-
-            std::unique_lock lock0(lock_table0[l_index0]);
-            std::unique_lock lock1(lock_table1[l_index1]);
+            std::unique_lock<std::recursive_mutex> lock0(lock_table[0][l_index0]);
+            std::unique_lock<std::recursive_mutex> lock1(lock_table[1][l_index1]);
         }
 
     public:
@@ -125,97 +162,119 @@ template <typename T> class concurrent_set: public set<T> {
             this->locks = num_locks;
             this->limit = limit;
 
-            table0 = new entry[set_size];
-            table1 = new entry[set_size];
+            tables[0] = std::vector<std::vector<T>>(size);
+            tables[1] = std::vector<std::vector<T>>(size);
 
             for(int i = 0; i < set_size; i++) {
-                table0[i].has_value = false;
-                table1[i].has_value = false;
+                tables[0].push_back(std::vector<T>(probe_size));
+                tables[1].push_back(std::vector<T>(probe_size));
             }
 
-            std::vector<std::shared_mutex> locks0(num_locks);
-            std::vector<std::shared_mutex> locks1(num_locks);
+            std::vector<std::recursive_mutex> locks0(num_locks);
+            std::vector<std::recursive_mutex> locks1(num_locks);
 
-            lock_table0.swap(locks0);
-            lock_table1.swap(locks1);
+            lock_table[0].swap(locks0);
+            lock_table[1].swap(locks1);
         }
 
-        ~concurrent_set(){
-            delete[] table0;
-            delete[] table1;
-        }
+        // ~concurrent_set(){
+        //     delete[] tables;
+        // }
         
         bool add(T value) {
+            acquire(value);
+
             // If the table already contains the value return false
             if (contains(value)) {
                 return false;
             }
-            
-            for(int i = 0; i < limit; i++) {
-                aquire_w(value);
-                
-                entry swapped = swap(table0, value, hash0(value));
-                if (!swapped.has_value) {
-                    return true;
-                }
-                value = swapped.value;
-                
-                // Take the value we swapped from table0 and repeat the process for table1
-                swapped = swap(table1, value, hash1(value));
-                if (!swapped.has_value) {
-                    return true;
-                }
-                value = swapped.value;
-            }
 
-            std::cout << "Oh no!" << std::endl;
-            // We've gone <limit> iterations, the table is probably full, resize it
-            resize();
-            add(value);
+            int index0 = hash0(value);
+            int index1 = hash1(value);
+
+            bool to_resize = false;
+
+            int table_index = -1;
+            int hash_index = -1;
+
+            if (tables[0][index0].size() < threshold) {
+                tables[0][index0].push_back(value);
+                return true;
+            }
+            else if (tables[1][index1].size() < threshold) {
+                tables[1][index1].push_back(value);
+                return true;
+            }
+            else if (tables[0][index0].size() < probe_size) {
+                tables[0][index0].push_back(value);
+                table_index = 0;
+                hash_index = index0;
+            }
+            else if (tables[1][index1].size() < probe_size) {
+                tables[1][index1].push_back(value);
+                table_index = 1;
+                hash_index = index1;
+            }
+            else {
+                to_resize = true;
+            }
+            
+            if (to_resize) {
+                resize();
+                add(value);
+            }
+            else if (!relocate(table_index, hash_index)) {
+                resize();
+            }
 
             return true;
         }
 
         bool remove(T value){
-            aquire_w(value);
+            acquire(value);
             // Check if the value is in table0, if so, remove it
-            int index = hash0(value);
+            int index0 = hash0(value);
 
-            if (table0[index].has_value && table0[index].value == value) {
-                table0[index].has_value = false;
-                return true;
+            for (auto it = tables[0][index0].begin(); it != tables[0][index0].end(); ++it) {
+                if (*it == value) {
+                    tables[0][index0].erase(it);
+                    return true;
+                }
             }
 
-            // Check if the value is in table1, if so, remove it
-            index = hash1(value);
-
-            if (table1[index].has_value && table1[index].value == value) {
-                table1[index].has_value = false;
-                return true;
+            // Perform the same check for table1
+            int index1 = hash1(value);
+            
+            for (auto it = tables[1][index1].begin(); it != tables[1][index1].end(); ++it) {
+                if (*it == value) {
+                    tables[1][index1].erase(it);
+                    return true;
+                }
             }
-
-            // The value wasn't in either table, return false
+            
             return false;
         }
 
         bool contains(T value){
+            acquire(value);
             // Check if the value is in table0
-            aquire_r(value);
+            int index0 = hash0(value);
 
-            int index = hash0(value);
-
-            if (table0[index].has_value && table0[index].value == value) {
-                return true;
+            for (auto it = tables[0][index0].begin(); it != tables[0][index0].end(); ++it) {
+                if (*it == value) {
+                    return true;
+                }
             }
 
-            // Check if the value is in table1
-            index = hash1(value);
+            // Perform the same check for table1
+            int index1 = hash1(value);
 
-            if (table1[index].has_value && table1[index].value == value) {
-                return true;
+            for (auto it = tables[1][index1].begin(); it != tables[1][index1].end(); ++it) {
+                if (*it == value) {
+                    return true;
+                }
             }
-
-            // The value wasn't in either table, return false
+            
             return false;
         }
 
@@ -224,13 +283,9 @@ template <typename T> class concurrent_set: public set<T> {
             
             // Iterate over both tables, add to count whenever we hit an element
             for(int i = 0; i < set_size; i++) {
-                if (table0[i].has_value) {
-                    count++;
-                }
+                count += tables[0][i].size();
 
-                if (table1[i].has_value) {
-                    count++;
-                }
+                count += tables[1][i].size();
             }
 
             return count;

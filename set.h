@@ -4,8 +4,6 @@
 template<typename T> class set {
 
     public:
-
-        virtual ~set() {}
         
         virtual bool add(T value)       = 0;
 
