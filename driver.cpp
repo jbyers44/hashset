@@ -162,7 +162,7 @@ int random_int() {
 
 std::atomic<int> total_operations;
 
-void do_work(set<int>* int_set, results &res, config cfg, std::vector<char> op_dist, std::vector<int> val_dist) {
+void do_work(set<int>* int_set, results &res, config cfg, std::vector<char> &op_dist, std::vector<int> &val_dist) {
 
 	auto op_iter = op_dist.begin();
 	auto val_iter = val_dist.begin();
@@ -278,6 +278,8 @@ int main(int argc, char** argv) {
     results res;
 
     int_set->populate(cfg.population, &random_int);
+
+    std::cout << "[list populated]" << std::endl;
     
     std::vector<std::vector<char>> op_dists = op_distributions(cfg);
     std::vector<std::vector<int>> val_dists = val_distributions(cfg);
@@ -288,7 +290,7 @@ int main(int argc, char** argv) {
 		do_work(int_set, res, cfg, op_dists[0], val_dists[0]);
 	} else {
 		for (int i = 0; i < cfg.threads; ++i) {
-			threads.push_back(std::thread(&do_work, int_set, std::ref(res), cfg, op_dists[i], val_dists[i]));
+			threads.push_back(std::thread(&do_work, int_set, std::ref(res), cfg, std::ref(op_dists[i]), std::ref(val_dists[i])));
 		}
 
 		for (int i = 0; i < cfg.threads; ++i) {
