@@ -10,6 +10,7 @@
 
 #include "sequential.cpp"
 #include "concurrent.cpp"
+#include "transactional.cpp"
 
 enum implementation_t {
     sequential = 1,
@@ -266,13 +267,16 @@ int main(int argc, char** argv) {
         case concurrent:
             int_set = new concurrent_set<int>(cfg.size, cfg.locks, limit);
             break;
+        case transactional:
+            int_set = new transactional_set<int>(cfg.size, limit);
+            break;
         default:
             break;
     }
 
     std::vector<std::thread> threads;
     results res;
-    
+
     int_set->populate(cfg.population, &random_int);
 
     std::vector<std::vector<char>> op_dists = op_distributions(cfg);

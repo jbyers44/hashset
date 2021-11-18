@@ -18,8 +18,8 @@ tmp  := $(shell mkdir -p $(ODIR))
 
 # Basic compiler configuration and flags
 CXX      = g++
-CXXFLAGS = -MMD -ggdb -std=c++17 -m$(BITS)
-LDFLAGS	 = -m$(BITS) -lpthread -lrt
+CXXFLAGS = -MMD -ggdb -std=c++17 -m$(BITS) -fgnu-tm 
+LDFLAGS	 = -m$(BITS) -lpthread -lrt -fgnu-tm 
 
 # The basenames of the c++ files that this program uses
 CXXFILES = driver concurrent sequential transactional

@@ -177,10 +177,6 @@ template <typename T> class concurrent_set: public set<T> {
             lock_table[1].swap(locks1);
         }
 
-        // ~concurrent_set(){
-        //     delete[] tables;
-        // }
-        
         bool add(T value) {
             acquire(value);
 
@@ -244,7 +240,6 @@ template <typename T> class concurrent_set: public set<T> {
 
             // Perform the same check for table1
             int index1 = hash1(value);
-            
             for (auto it = tables[1][index1].begin(); it != tables[1][index1].end(); ++it) {
                 if (*it == value) {
                     tables[1][index1].erase(it);
